@@ -23,6 +23,8 @@
 /* USER CODE BEGIN Includes */
 #include "INA219.h"
 #include <stdio.h>
+#include "string.h"
+#include "stdlib.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,13 +49,13 @@ I2C_HandleTypeDef hi2c2;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
-TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-static uint8_t data[64];
+char uartBuffer[65536]; // 65536 la size lon nhat cua 1 char array
+volatile uint16_t encoderCount1 = 0, encoderCount2 = 0; // variable cho viec doc encoder
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,7 +65,6 @@ static void MX_I2C1_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
-static void MX_TIM4_Init(void);
 static void MX_TIM5_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
@@ -73,18 +74,8 @@ static void MX_USART2_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/*
-    Danh sách pin
-    IN1
-    IN2
-    IN3
-    IN4
-    ENA
-    ENB
-*/
-
-/**	clockwise = 1 -> động cơ quay thuận chiều kim đồng hồ
- * 	clockwise = 0 -> động cơ quay ngược chiều kim đồng hồ
+/**	clockwise = 1 -> động cơ quay thuận chieu kim đồng hồ
+ * 	clockwise = 0 -> động cơ quay ngược chieu kim đồng hồ
  * 	motor = 1 -> động cơ gắn với các chân OUT1, OUT2, ENA, IN1, IN2
  * 	motor = 2 -> động cơ gắn với các chân OUT3, OUT4, ENB, IN3, IN4
  */
@@ -136,8 +127,7 @@ void genPWM(int motor, int dutyCycle)
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-  // dành cho việc đọc encoder
-  int16_t count1 = -1, count2 = -1;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -162,14 +152,12 @@ int main(void)
   MX_I2C2_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
-  MX_TIM4_Init();
   MX_TIM5_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   while(!INA219_Init(&ina219, &hi2c1, INA219_ADDRESS));
   INA219_setCalibration_16V_400mA(&ina219);
 
-  //HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);	// non-blocking (polling mode)
   HAL_TIM_Encoder_Start(&htim5, TIM_CHANNEL_ALL);	// non-blocking (polling mode)
   /* USER CODE END 2 */
@@ -181,26 +169,27 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    // Điều khiển động cơ
+    // dieu khien chieu quay dong co
     //rotateClockwise(1, 1);
 
-    // Đọc encoder
-   count1 = __HAL_TIM_GET_COUNTER(&htim5);
-   count2 = __HAL_TIM_GET_COUNTER(&htim2);
-   sprintf(data, "\nencoderA: %d - encoderB: %d", count1, count2);
-   HAL_UART_Transmit(&huart2, data, 128, 100);
+    //---------------------------- Doc encoder ----------------------------------------------------
 
-    // Đọc cảm biến dòng
+    encoderCount1 = __HAL_TIM_GET_COUNTER(&htim5);
+    sprintf(uartBuffer, "encoderCount1: %d\t-\t", encoderCount1);
+    HAL_UART_Transmit(&huart2, (uint8_t*)uartBuffer, strlen(uartBuffer), 100);
+
+    encoderCount2 = __HAL_TIM_GET_COUNTER(&htim2);
+    sprintf(uartBuffer, "encoderCount2: %d\n\r", encoderCount2);
+    HAL_UART_Transmit(&huart2, (uint8_t*)uartBuffer, strlen(uartBuffer), 100);
+    //---------------------------- Ket thuc doc encoder -------------------------------------------
+
+    // doc cam bien dong
     vbus = INA219_ReadBusVoltage(&ina219);
     vshunt = INA219_ReadShuntVolage(&ina219);
     current = INA219_ReadCurrent(&ina219);
-    
-    // uint8_t str[8];
-    // sprintf(str, "%d", current);
-    // HAL_UART_Transmit(&huart2, str, sizeof(str), 100);
-    sprintf(data, "\nvbus: %d\n\rvshunt: %d\n\rcurrent: %d\n\n\r", vbus, vshunt, current);
-    HAL_UART_Transmit(&huart2, data, 128, 100);
-	  HAL_Delay(1000);
+    sprintf(uartBuffer, "\nvbus: %d\n\rvshunt: %d\n\rcurrent: %d\n\n\r", vbus, vshunt, current);
+    HAL_UART_Transmit(&huart2, uartBuffer, strlen(uartBuffer), 100);
+	HAL_Delay(500);
 
   }
   /* USER CODE END 3 */
@@ -341,7 +330,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 0xffff;
+  htim2.Init.Period = 65000;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
@@ -419,55 +408,6 @@ static void MX_TIM3_Init(void)
 }
 
 /**
-  * @brief TIM4 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM4_Init(void)
-{
-
-  /* USER CODE BEGIN TIM4_Init 0 */
-
-  /* USER CODE END TIM4_Init 0 */
-
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-
-  /* USER CODE BEGIN TIM4_Init 1 */
-
-  /* USER CODE END TIM4_Init 1 */
-  htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 0;
-  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 65535;
-  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM4_Init 2 */
-
-  /* USER CODE END TIM4_Init 2 */
-  HAL_TIM_MspPostInit(&htim4);
-
-}
-
-/**
   * @brief TIM5 Initialization Function
   * @param None
   * @retval None
@@ -488,7 +428,7 @@ static void MX_TIM5_Init(void)
   htim5.Instance = TIM5;
   htim5.Init.Prescaler = 0;
   htim5.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim5.Init.Period = 0xffff;
+  htim5.Init.Period = 65000;
   htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim5.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
